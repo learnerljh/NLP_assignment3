@@ -1,0 +1,4 @@
+torch  # Adjust based on your CUDA version, e.g., torch==2.0.1+cu118 for CUDA 11.8
+transformers  # Adjust to match the version you need
+quant==0.2.0  # The quantization library; confirm version compatibility
+
