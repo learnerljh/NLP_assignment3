@@ -19,6 +19,31 @@ def customized_greedy_decoding(batch):
 
     return res, time.time() - start_time
 
+def prefix_caching_decoding(batch):
+    prefix = "Once upon a time"
+    input_ids = tokenizer.encode(prefix, return_tensors="pt")
+
+    # 缓存前缀的中间状态
+    with torch.no_grad():
+        outputs = custom_model(input_ids, use_cache=True)
+        past_key_values = outputs.past_key_values  # 缓存前缀的注意力键值对
+
+    # 生成后续 token
+    generated_tokens = []
+    for timestep in range(MAX_NEW_LENGTH):# 生成 10 个 token
+        next_token_logits = outputs.logits[:, -1, :]  # 取最后一个 token 的 logits
+        next_token = torch.argmax(next_token_logits, dim=-1).unsqueeze(0)  # 选择概率最高的 token
+        generated_tokens.append(next_token.item())
+
+        # 使用缓存的 past_key_values 生成下一个 token
+        outputs = model(next_token, past_key_values=past_key_values, use_cache=True)
+        past_key_values = outputs.past_key_values  # 更新缓存
+
+    # 解码生成的 token
+    generated_text = tokenizer.decode(generated_tokens)
+    print(f"Generated Text: {generated_text}")
+
+    return res, time.time() - start_time
 
 @torch.no_grad()
 def golden_greedy_decoding_wo_cache(batch):
@@ -49,6 +74,7 @@ if __name__ == "__main__":
     tokenizer.pad_token = tokenizer.eos_token
     original_model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2", attn_implementation="eager", device_map='cuda')
     custom_model = CustomizedGPT2LMHeadModel.from_pretrained("openai-community/gpt2", attn_implementation="eager", device_map="cuda")
+    prefix_caching_model = CustomizedGPT2LMHeadModel.from_pretrained("openai-community/gpt2", attn_implementation="eager", device_map="cuda")
 
     with open("data.txt") as f:
         prompt_dataset = [i.strip() for i in f.readlines()]

@@ -26,18 +26,25 @@ def measure_throughput(model, tokenizer, dataset, max_new_tokens=50, use_kv_cach
         input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(DEVICE)
 
         # Measure the time for generating tokens
+        
+        torch.cuda.reset_peak_memory_stats()
         start_time = time.time()
+        torch.cuda.synchronize()
         with torch.no_grad():
             if use_kv_cache:
                 # Enable KV caching
                 if quantization:
                     outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=True,
                     cache_implementation="quantized", cache_config={"nbits":quantization, "backend":"quanto"})
+                    memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
                 else:
                     outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=True)
+                    memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
             else:
                 # Naive implementation
                 outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=False)
+                memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
+        torch.cuda.synchronize()
         elapsed_time = time.time() - start_time
 
         # Update total tokens and time
@@ -46,14 +53,10 @@ def measure_throughput(model, tokenizer, dataset, max_new_tokens=50, use_kv_cach
 
     # Compute throughput
     throughput = total_tokens / total_time
-
-    # Measure GPU memory usage
-    memory_usage = torch.cuda.memory_summary(abbreviated=True, device='cuda')
-
-    return throughput, memory_usage
+    return elapsed_time, memory_usage
 
 # Load dataset
-with open(r"C:\Users\lijiahao\PycharmProjects\NLP_assignment3\NLPDL-task1\data.txt", "r") as f:
+with open("/home/mohan/NLP_assignment3/data.txt", "r") as f:
     dataset = f.readlines()
 
 # Experiment parameters
@@ -77,4 +80,6 @@ results["KV-Cache INT2"] = measure_throughput(model, tokenizer, dataset, max_new
 # Display results
 print(f"\nResults on dataset (data.txt):\n")
 for key, (throughput, memory) in results.items():
+    throughput = float(throughput)
+    memory = float(memory)
     print(f"{key} - Throughput: {throughput:.2f} tokens/sec, Memory Usage: {memory:.2f} MB")
