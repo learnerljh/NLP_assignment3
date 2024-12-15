@@ -103,6 +103,10 @@ This task evaluates the performance of different **prompting strategies** on the
    ```bash
    python prompt_evaluation.py naive
    ```
+   or
+   ```bash
+   python reflexion.py
+   ```
 
 4. The script will output the accuracy of the generated answers for the specified prompt strategy.
 
