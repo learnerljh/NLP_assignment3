@@ -1,85 +1,80 @@
+# -*- coding: utf-8 -*-
+import time
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import time
+from transformers.generation import GenerationConfig
+from transformers.trainer_utils import set_seed
+from tqdm import tqdm
+import sys
 
-# Define the model and tokenizer
-MODEL_NAME = "gpt2"  # Using GPT-2
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+seed = 1024
+max_experiment_times = 1
+context_length_per_experiment = 1
+generate_length_per_experiment = 2048
+use_flash_attn = False
 
-# Load model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME).to(DEVICE)
+quant_type = sys.argv[1] #bf16, int4 or nocache
 
-# Helper function to measure throughput
-def measure_throughput(model, tokenizer, dataset, max_new_tokens=50, use_kv_cache=False, quantization=None):
-    """
-    Measures inference throughput (tokens/second) and GPU memory usage for a dataset.
-    """
-    # Apply quantization if specified
+set_seed(seed)
 
-    # Prepare for throughput measurement
-    total_tokens = 0
-    total_time = 0
+tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen-7B-Chat", trust_remote_code=True)
 
-    # Iterate through each line in the dataset
-    for input_text in dataset:
-        input_ids = tokenizer(input_text, return_tensors="pt").input_ids.to(DEVICE)
+use_cache = True
+if quant_type == "bf16":
+    model = AutoModelForCausalLM.from_pretrained(
+        "Qwen/Qwen-7B-Chat", 
+        device_map="cuda:0", 
+        trust_remote_code=True, 
+        bf16=True, 
+        use_flash_attn=False, 
+        use_cache_kernel=True
+    ).eval()   
+elif quant_type == "int4":
+    # please install AutoGPTQ following the readme to use quantization
+    from auto_gptq import AutoGPTQForCausalLM
+    model = AutoGPTQForCausalLM.from_quantized(
+        "Qwen/Qwen-7B-Chat-Int4", 
+        device="cuda:0", 
+        trust_remote_code=True, 
+        use_safetensors=True, 
+        use_flash_attn=False, 
+        use_cache_kernel=True
+    ).eval()
+elif quant_type == "nocache":
+    model = AutoModelForCausalLM.from_pretrained(
+        "Qwen/Qwen-7B-Chat", 
+        device_map="cuda:0", 
+        trust_remote_code=True, 
+        use_cache_kernel=False,
+        use_cache=False, 
+        use_flash_attn=False,
+        bf16=True
+    ).eval()
+    use_cache = False
 
-        # Measure the time for generating tokens
-        
-        torch.cuda.reset_peak_memory_stats()
-        start_time = time.time()
-        torch.cuda.synchronize()
-        with torch.no_grad():
-            if use_kv_cache:
-                # Enable KV caching
-                if quantization:
-                    outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=True,
-                    cache_implementation="quantized", cache_config={"nbits":quantization, "backend":"quanto"})
-                    memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
-                else:
-                    outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=True)
-                    memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
-            else:
-                # Naive implementation
-                outputs = model.generate(input_ids, max_new_tokens=max_new_tokens, use_cache=False)
-                memory_usage = torch.cuda.max_memory_allocated(device='cuda') / 1024**2
-        torch.cuda.synchronize()
-        elapsed_time = time.time() - start_time
+config = GenerationConfig.from_pretrained("Qwen/Qwen-7B-Chat", trust_remote_code=True)
+config.min_length = generate_length_per_experiment + context_length_per_experiment
+config.max_new_tokens = generate_length_per_experiment
 
-        # Update total tokens and time
-        total_tokens += max_new_tokens
-        total_time += elapsed_time
+time_costs = []
+context_str = '我' * context_length_per_experiment
+max_gpu_memory_cost = 0
+for _ in tqdm(range(max_experiment_times)):
+    inputs = tokenizer(context_str, return_tensors='pt')
+    inputs = inputs.to(model.device)
+    t1 = time.time()
+    pred = model.generate(**inputs, generation_config=config, use_cache=use_cache)
+    time_costs.append(time.time() - t1)
+    assert pred.shape[1] == config.min_length
+    max_gpu_memory_cost = max(max_gpu_memory_cost, torch.cuda.max_memory_allocated())
+    torch.cuda.empty_cache()
 
-    # Compute throughput
-    throughput = total_tokens / total_time
-    return elapsed_time, memory_usage
-
-# Load dataset
-with open("/home/mohan/NLP_assignment3/data.txt", "r") as f:
-    dataset = f.readlines()
-
-# Experiment parameters
-max_new_tokens = 50
-
-# Measure throughput and memory for each implementation
-results = {}
-
-# Naive implementation
-results["Naive"] = measure_throughput(model, tokenizer, dataset, max_new_tokens, use_kv_cache=False)
-
-# KV-cache-enabled implementation
-results["KV-Cache"] = measure_throughput(model, tokenizer, dataset, max_new_tokens, use_kv_cache=True)
-
-# KV-cache with INT4 quantization
-results["KV-Cache INT4"] = measure_throughput(model, tokenizer, dataset, max_new_tokens, use_kv_cache=True, quantization=4)
-
-# KV-cache with INT2 quantization
-results["KV-Cache INT2"] = measure_throughput(model, tokenizer, dataset, max_new_tokens, use_kv_cache=True, quantization=2)
-
-# Display results
-print(f"\nResults on dataset (data.txt):\n")
-for key, (throughput, memory) in results.items():
-    throughput = float(throughput)
-    memory = float(memory)
-    print(f"{key} - Throughput: {throughput:.2f} tokens/sec, Memory Usage: {memory:.2f} MB")
+print("Average generate speed (tokens/s): {}".format((max_experiment_times * generate_length_per_experiment) / sum(time_costs)))
+print(f"GPU Memory cost: {max_gpu_memory_cost / 1024 / 1024 / 1024}GB")
+print("Experiment setting: ")
+print(f"seed = {seed}")
+print(f"max_experiment_times = {max_experiment_times}")
+print(f"context_length_per_experiment = {context_length_per_experiment}")
+print(f"generate_length_per_experiment = {generate_length_per_experiment}")
+print(f"use_flash_attn = {use_flash_attn}")
+print(f"quant_type = {quant_type}")

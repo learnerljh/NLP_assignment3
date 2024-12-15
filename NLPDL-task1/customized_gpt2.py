@@ -766,6 +766,7 @@ class CustomizedGPT2LMHeadModel(GPT2LMHeadModel):
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        self.transformer.past_key_values = past_key_values
         transformer_outputs = self.transformer(
             input_ids,
             past_key_values=past_key_values,

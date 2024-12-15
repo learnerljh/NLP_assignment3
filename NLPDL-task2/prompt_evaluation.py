@@ -40,7 +40,7 @@ class GSM8kDataset(Dataset):
         self.name = 'gsm8k'
         split = 'test'
         if True:
-            dataset = load_dataset(r'C:\Users\lijiahao\PycharmProjects\NLP_assignment3\NLPDL-task2\data')
+            dataset = load_dataset('NLP_assignment3/NLPDL-task2/data')
         else:
             dataset = load_dataset(self.name)
         dataloader = dataset[split]
@@ -157,13 +157,13 @@ def main():
     # Load the dataset
     dataset = GSM8kDataset()
     # Load the prompts
-    if sys.argv:
+    if len(sys.argv) > 1:
         if sys.argv[1] == 'cot':
             prompts = ["What is the answer to the following math word problem? <QUESTION> Please provide the final answer after ####. example: #### 123. Let's think step by step."]
         elif sys.argv[1] == 'few-shot':
             prompts = ["Here are some examples. Natalia sold clips to 48 of her friends in April, and then she sold half as many clips in May. How many clips did Natalia sell altogether in April and May? ** Natalia sold 48/2 = <<48/2=24>>24 clips in May.\nHow many clips did Natalia sell altogether in April and May? ** Natalia sold 48+24 = <<48+24=72>>72 clips altogether in April and May.\n#### 72. What is the answer to the following math word problem? Janet, a third grade teacher, is picking up the sack lunch order from a local deli for the field trip she is taking her class on. There are 35 children in her class, 5 volunteer chaperones, and herself. She she also ordered three additional sack lunches, just in case there was a problem. Each sack lunch costs $7. How much do all the lunches cost in total? Janet needs 35 lunches for the kids + 5 for the chaperones + 1 for herself + 3 extras = <<35+5+1+3=44>>44 lunches.\nEach lunch is $7, so lunch for the field trip costs $7 per lunch * 44 lunches = $<<7*44=308>>308 total\n#### 308 Please answer the following math question <QUESTION>. Please provide the final answer after ####. example: #### 123"]
         else:
-            raise ValueError("Invalid argument")
+            prompts = ['What is the answer to the following math word problem? <QUESTION> Please provide the final answer after ####. example: #### 123']
     else:
         prompts = ['What is the answer to the following math word problem? <QUESTION> Please provide the final answer after ####. example: #### 123']
     prompts = prompts * len(dataset.questions)
@@ -183,11 +183,7 @@ def main():
             ],
             stream=False
         )
-        print(response.choices[0].message.content)
-        print(get_generated_answer(response.choices[0].message.content))
-        print(answer.split('####')[-1].strip())
         if get_generated_answer(response.choices[0].message.content) == answer.split('####')[-1].strip():
-
             cnt_match += 1
     print(f'Accuracy: {cnt_match}/{len(dataset.questions)}')
 
