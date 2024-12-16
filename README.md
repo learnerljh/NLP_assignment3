@@ -24,6 +24,7 @@ NLPDL-task2/
 .gitignore
 LICENSE
 README.md
+NLP_DL_Assignment_3_Report.pdf
 ```
 
 ---
